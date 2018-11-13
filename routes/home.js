@@ -23,6 +23,27 @@ module.exports = function (router) {
     })
   });
 
+  var usersRoute = router.route('/users');
+
+  usersRoute.get(function (req, res) {
+    var errMsg = '';
+    if (req.body.pw != secrets.pw) {
+      errMsg += 'Incorrect password! '
+    }
+    if (errMsg) {
+      errMsg = 'Validation error(s): ' + errMsg;
+      console.log(errMsg);
+      return res.status(500).json({ message: errMsg, data: [] });
+    }
+
+    var query = User.find({});
+
+    query.exec(function (err, users) {
+      if (err) return res.status(500);
+      res.json({ message: 'OK', data: users });
+    })
+  });
+
   eventsRoute.post(function (req, res) {
     var errMsg = '';
 
@@ -57,7 +78,8 @@ module.exports = function (router) {
     var newEvent = new Event({
       name: req.body.name,
       date: req.body.date,
-      points: req.body.points
+      points: req.body.points,
+      category: req.body.category
     });
 
     newEvent.save(function (err) {
@@ -82,6 +104,8 @@ module.exports = function (router) {
     let valid = validate_netid(netid);
     if (valid === false) return res.status(404).json({message: 'Invalid netid', data: []});
 
+    if (req.body.event_key != secrets.event_key) return res.status(404).json({message: 'Invalid event key', data: []});
+
     Event.findOne({ _id: req.params.id }, function (err, event) {
       if (err || !event) return res.status(404).json({ message: 'Event not found', data: [] });
       if (event.attendees.includes(netid)) {
@@ -90,7 +114,36 @@ module.exports = function (router) {
       event.attendees.push(netid);
       event.save(function (err) {
         if (err) return res.status(500).json({ message: 'Error with updating the event', data: [] });
-        res.status(201).json({ message: 'Event updated!', data: event });
+
+        User.findOne({ netid: req.params.netid }, function (e, user) {
+          if (err) {
+            return res.status(500);
+          }
+
+          if (!user) {
+            // Create a user if they don't exist
+            var newUser = new User({
+              netid: req.params.id,
+              points: 0,
+              office_hours: [],
+              committees: []
+            });
+
+            newUser.save(function (err) {
+              if (err) return res.status(500).json({ message: 'Error with creating the user', data: [] });
+            });
+
+            targetUser = newUser;
+          } else {
+            targetUser = user;
+          }
+
+          targetUser.points = targetUser.points + event.points;
+          targetUser.save(function (err) {
+            if (err) return res.status(500).json({ message: 'Error with updating the user', data: [] });
+            res.status(201).json({ message: 'Successfully signed in!', data: event});
+          })
+        })
       });
     })
   })
@@ -134,10 +187,10 @@ module.exports = function (router) {
       // Update userstats w/ committee & oh pts
 
       if (type === 'committee') {
-        if (!targetUser.committees.includes(date))
+        if (targetUser.committees.includes(date) === false)
           targetUser.committees.push(date);
       } else if (type === 'office_hours') {
-        if (!targetUser.office_hours.includes(date))
+        if (targetUser.office_hours.includes(date) === false)
           targetUser.office_hours.push(date);
       }
 
@@ -188,8 +241,7 @@ module.exports = function (router) {
 
       // Update userstats w/ committee & oh pts
       userStats.committees = targetUser.committees;
-      userStats.office_hours = targetUser.office_hours;
-    });
+      userStats.office_hours = targetUser.office_hours;;
 
     // Totals up points for User
     var query = Event.find({});
@@ -201,11 +253,10 @@ module.exports = function (router) {
           userStats.attended_events.push(event);
         }
       })
-
-      // res.json({ message: 'Total number of points for ' + req.params.id + ': ' + total_pts, data: attended_events })
       res.json({ message: 'OK', data: userStats });
     })
   });
+      });
 
   return router;
 }
