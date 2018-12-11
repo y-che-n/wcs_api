@@ -23,13 +23,15 @@ module.exports = function (router) {
     })
   });
 
+
   var usersRoute = router.route('/users');
 
   usersRoute.get(function (req, res) {
+    console.log(req)
     var errMsg = '';
-    if (req.body.pw != secrets.pw) {
-      errMsg += 'Incorrect password! '
-    }
+  //  if (req.headers.pw != secrets.pw) {
+  //    errMsg += 'Incorrect password! '
+  //  }
     if (errMsg) {
       errMsg = 'Validation error(s): ' + errMsg;
       console.log(errMsg);
@@ -75,11 +77,18 @@ module.exports = function (router) {
 
     console.log(req.body);
 
+    event_key = generateEventKey();
+    event_date = new Date(req.body.date);
+    expirationDate = new Date(event_date).setHours(event_date.getHours() + 2);
+    console.log(expirationDate);
+
     var newEvent = new Event({
       name: req.body.name,
       date: req.body.date,
       points: req.body.points,
-      category: req.body.category
+      category: req.body.category,
+      key: event_key,
+      expiration: expirationDate
     });
 
     newEvent.save(function (err) {
@@ -102,18 +111,19 @@ module.exports = function (router) {
     const netid = req.body.netid;
 
     let valid = validate_netid(netid);
-    if (valid === false) return res.status(404).json({message: 'Invalid netid', data: []});
-
-    if (req.body.event_key != secrets.event_key) return res.status(404).json({message: 'Invalid event key', data: []});
+    if (valid === false) return res.status(404).json({message: 'invalid netid', data: []});
 
     Event.findOne({ _id: req.params.id }, function (err, event) {
-      if (err || !event) return res.status(404).json({ message: 'Event not found', data: [] });
+      if (err || !event) return res.status(404).json({ message: 'event not found', data: [] });
+      if (req.body.event_key != event.key) return res.status(404).json({message: 'invalid event key', data: []});
+      let currentTime = new Date();
+      if (currentTime < event.date || currentTime > event.expiration) return res.status(404).json({message: 'event is not running', data: []})
       if (event.attendees.includes(netid)) {
-        return res.status(201).json({message: 'Already signed in', data: event});
+        return res.status(201).json({message: 'already signed in', data: event});
       }
       event.attendees.push(netid);
       event.save(function (err) {
-        if (err) return res.status(500).json({ message: 'Error with updating the event', data: [] });
+        if (err) return res.status(500).json({ message: 'error with updating the event', data: [] });
 
         User.findOne({ netid: req.params.netid }, function (e, user) {
           if (err) {
@@ -264,4 +274,11 @@ module.exports = function (router) {
 function validate_netid(netid) {
   const re = new RegExp('\\b[a-z]+\\d{1,3}\\b');
   return re.test(netid);
+}
+
+function generateEventKey() {
+  i = Math.floor(Math.random() * 100);
+  j = Math.floor(Math.random() * 100);
+
+  return secrets.first_word[i] + ' ' + secrets.second_word[j];
 }
